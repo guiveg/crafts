@@ -32,7 +32,7 @@ Alternatively, you can just try a live version of CRAFTS on [https://crafts.gsic
 Training
 ==========
 * [A quick introduction to CRAFTS](https://crafts.gsic.uva.es/CRAFTSslides.pdf)
-* [A guide for using an API CRAFTS](https://crafts.gsic.uva.es/CRAFTSglobaleco.pdf)
+* [A guide for using an API CRAFTS](https://crafts.gsic.uva.es/CRAFTSaccess101.pdf)
 * [A guide for configuring an API CRAFTS](https://crafts.gsic.uva.es/CRAFTSconfig101.html)
 
 
