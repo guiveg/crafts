@@ -1,6 +1,6 @@
-CRAFTS: Configurable RESTful APIs For Triple Stores
+CRAFTS: Configurable REST APIs For Triple Stores
 ==========
-CRAFTS (Configurable RESTful APIs For Triple Stores) is a configurable generator of RESTful APIs to simplify access to triple stores.
+CRAFTS (Configurable REST APIs For Triple Stores) is a configurable generator of REST APIs to simplify access to triple stores.
 CRAFTS allows knowledge engineers to configure REST APIs over multiple triple stores. 
 Web developers can then use a CRAFTS API to read and write Linked Open Data. 
 CRAFTS automatically handles the translation of API calls into SPARQL queries, delivering results in JSON format. 
@@ -38,4 +38,4 @@ Training
 
 Help us to improve
 ==========
-CRAFTS is available under a MIT license. Please send us an email to [guiveg@tel.uva.es](mailto:guiveg@tel.uva.es) if you use or plan to use CRAFTS. Drop us also a message if you have comments or suggestions for improvement.
+CRAFTS is available under an Apache 2.0 license. Please send us an email to [guiveg@tel.uva.es](mailto:guiveg@tel.uva.es) if you use or plan to use CRAFTS. Drop us also a message if you have comments or suggestions for improvement.
