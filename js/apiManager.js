@@ -426,8 +426,9 @@ async function init() {
 							let apiConfig = await util.loadFile(path);
 							// analizo si la api cargada es correcta
 							if (apiConfig.apiId != undefined && apiConfig.apiId === apiId) {			
+								// 2021-07-11 dejo de validar el modelo al iniciar, se supone que se hizo bien en su momento
 								// etiqueta correcta... pido validación del modelo
-								await modelValidator.validateAPIConfig(apiConfig, {quuid: 'init', apiId: apiId});
+								//await modelValidator.validateAPIConfig(apiConfig, {quuid: 'init', apiId: apiId});
 								// configuración validada => creo la API
 								createAPI(apiId, apiConfig);
 								// inicializo en el dumpManager
@@ -1471,6 +1472,100 @@ async function regenerateTokens(req, res, next) {
 
 /** 
   * @swagger 
+  * /apis/{apiId}/cleanCache: 
+  *   post: 
+  *     summary: Clean the cache of a configured API
+  *     security:
+  *       - BasicAuth: []
+  *     tags: 
+  *       - api
+  *     operationId: cleanCacheApi
+  *     parameters:
+  *       - name: apiId
+  *         in: path
+  *         required: true
+  *         schema:
+  *           type: string  
+  *     responses:
+  *       '200': 
+  *         description: Cache of the API cleaned
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
+  *       '403': 
+  *         description: Forbidden
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
+  *       '404': 
+  *         description: API not found
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
+  */ 
+async function cleanCacheApi(req, res, next) {
+	// extraigo apiId
+	const apiId = req.params.apiId;
+	
+	// inicializo objeto de respuesta
+	let objresp = {};
+	
+	// compruebo si tiene permiso
+	const owner = retrieveApiOwner(apiId);
+	if (req.login !== 'root' && owner != undefined && owner !== req.login) {
+		// ni es root, ni la API está por definir, ni es el dueño de la API
+		objresp.status = 403;
+		objresp.message = 'Forbidden';
+		res.errorMessage = objresp.message;
+		res.status(objresp.status).send(objresp);
+		return;		
+	}
+	
+	// compruebo si existe la api
+	if (apis[apiId] == undefined) {
+		// no existe...
+		objresp.status = 404;
+		objresp.message = 'API not found: "' + apiId + '" is not registered';
+		res.errorMessage = objresp.message;
+		res.status(objresp.status).send(objresp);
+	} else { 
+		// existe, limpio la caché
+		apis[apiId].cache = {};
+		_.each(apis[apiId].config.model, (el) => {
+			apis[apiId].cache[el.id] = {};	
+		});
+		
+		// limpio también la caché de consultas con los endpoints de la API
+		// inicializo uris de los endpoints para borrar las consutas de la caché
+		let esuris = {};
+		_.each(apis[apiId].config.endpoints, (ep) => {
+			esuris[ep.sparqlURI] = true;
+			if (ep.sparqlUpdate != undefined)
+				esuris[ep.sparqlUpdate.sparqlURI] = true;
+		});
+	
+		// borro consultas de la caché para las esuris
+		for (let esuri in esuris)
+			dataManager.cleanCachedQueriesEndpoint(esuri);	
+			
+		// la limpieza de la caché ha ido bien, devuelvo resultado
+		objresp.status = 200;
+		objresp.message = 'The cache of API "' + apiId + '" has been cleaned';
+		// mensaje para el log...
+		logger.info(objresp.message);
+			
+		res.type('json');
+		res.send( objresp );
+	}
+	return;
+}
+
+
+/** 
+  * @swagger 
   * /apis/{apiId}: 
   *   delete: 
   *     summary: Delete a configured API
@@ -1828,8 +1923,6 @@ async function getResources(req, res, next) {
 		return;
 	}
 		
-	// TODO: ¿cortar la petición si son muchas IRIs?
-
 	// compruebo que exista el id correspondiente en el modelo de la configuración	
 	let mel = _.find(apis[apiId].config.model, (el) => el.id === id);
 	if (mel != undefined) {
@@ -2065,8 +2158,9 @@ async function putResource(req, res, next) {
 					+ '. #inserted triples: ' + datos.insertedTriples;
 			}			
 			res.status(objresp.status).send(objresp);
-			// 02-02-2021 vacío también la caché de consultas por si acaso
-			dataManager.cleanCachedQueries(new Date().getTime());
+			// 2021-02-02: vacío también la caché de consultas por si acaso
+			// 2021-07-12: ya no, se vacía de manera más fina en resourceUpdater
+			//dataManager.cleanCachedQueries(new Date().getTime());
 			return;			
 		} catch(err) {
 			// si no hacemos más comprobaciones de la petición habrá que asumir que el error es del servidor
@@ -2262,8 +2356,9 @@ async function patchResource(req, res, next) {
 				+ '. #deleted triples: ' + datos.deletedTriples 
 				+ '. #inserted triples: ' + datos.insertedTriples;
 			res.status(objresp.status).send(objresp);
-			// 02-02-2021 vacío también la caché de consultas por si acaso
-			dataManager.cleanCachedQueries(new Date().getTime());
+			// 2021-02-02: vacío también la caché de consultas por si acaso
+			// 2021-07-12: ya no, se vacía de manera más fina en resourceUpdater
+			//dataManager.cleanCachedQueries(new Date().getTime());
 			return;
 		} catch(err) {
 			// cojo el status del error incluido, si no hay habrá que asumir que el error es del servidor
@@ -2421,8 +2516,9 @@ async function deleteResource(req, res, next) {
 			objresp.message = 'Resource deleted. #queries: ' + datos.numberOfQueries 
 				+ '. #deleted triples: ' + datos.deletedTriples;
 			res.status(objresp.status).send(objresp);
-			// 02-02-2021 vacío también la caché de consultas por si acaso
-			dataManager.cleanCachedQueries(new Date().getTime());
+			// 2021-02-02: vacío también la caché de consultas por si acaso
+			// 2021-07-12: ya no, se vacía de manera más fina en resourceUpdater
+			//dataManager.cleanCachedQueries(new Date().getTime());
 			return;			
 		} catch(err) {
 			// si no hacemos más comprobaciones de la petición habrá que asumir que el error es del servidor
@@ -3152,6 +3248,7 @@ module.exports = {
 	getApi,
 	putApi,
 	regenerateTokens,
+	cleanCacheApi,
 	deleteApi,
 	
 	getResource,

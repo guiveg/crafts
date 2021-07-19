@@ -18,8 +18,14 @@ async function testEndpoint(endpoint, qtid, qinfo) {
 }
 
 // FUNCIÓN PARA RESPONDER A UNA CONSULTA PARAMETRIZADA
-async function answerQuery(endpoint, qtemp, aux, qinfo) { //, prefixes) {
-	// 02-02-2021: cacheo consultas
+async function answerQuery(endpoint, qtemp, aux, qinfo) {
+	// 2021-02-02: cacheo consultas
+	// 2021-07-12: reajusto el cacheo de consultas, agrupando por cada uri del punto sparql (esuri)
+	// preparo objeto con las consultas del endpoint si hace falta
+	const esuri = endpoint.sparqlURI;
+	if (cachedQueries[esuri] == undefined)
+		cachedQueries[esuri] = {};
+
 	// obtengo el hash de las consultas
 	const objaux = {
 		ep: endpoint,
@@ -27,18 +33,18 @@ async function answerQuery(endpoint, qtemp, aux, qinfo) { //, prefixes) {
 		au: aux
 	}
 	const hash = util.getHash(objaux);
-	
+
 	// si no está cacheada hay que hacer la consulta...
-	if (cachedQueries[hash] == undefined) {
-		cachedQueries[hash] = {}; // inicializo
-		cachedQueries[hash].datos = await sparqlClient.queryEndpoint(endpoint, qtemp.template, aux, qinfo);
-		cachedQueries[hash].timestampCache = new Date().getTime();		
+	if (cachedQueries[esuri][hash] == undefined) {
+		cachedQueries[esuri][hash] = {}; // inicializo
+		cachedQueries[esuri][hash].datos = await sparqlClient.queryEndpoint(endpoint, qtemp.template, aux, qinfo);
+		cachedQueries[esuri][hash].timestampCache = new Date().getTime();		
 	}
 	// devuelvo los datos
-	return cachedQueries[hash].datos;
+	return cachedQueries[esuri][hash].datos;
 }
 
-// FUNCIÓN PARA LIMPIAR LA CACHÉ DE CONSULTAS
+// FUNCIÓN PARA LIMPIAR LA CACHÉ DE CONSULTAS POR THRESHOLD
 function cleanCachedQueries(timeThreshold) {
 	// obtengo timestamp límite para borrar de la caché
 	const timeNow = new Date().getTime();
@@ -47,20 +53,30 @@ function cleanCachedQueries(timeThreshold) {
 		inspected: 0,
 		cleaned: 0		
 	};
-	// consultas a borrar
-	let hashesBorrar = [];	
-	for (let hash in cachedQueries) {
-		summary.inspected++; // una consulta más inspeccionada...
-		if (cachedQueries[hash].timestampCache < timeThreshold)
-			hashesBorrar.push(hash); // incluyo en la lista de borrrados
-	}
-	// actualizo borrados
-	summary.cleaned += hashesBorrar.length;
-	// y los borro de la caché
-	for (let i=0; i<hashesBorrar.length; i++)
-		delete cachedQueries[hashesBorrar[i]];	
+	// itero por cada esuri
+	for (let esuri in cachedQueries) {
+		// consultas a borrar
+		let hashesBorrar = [];	
+		for (let hash in cachedQueries[esuri]) {
+			summary.inspected++; // una consulta más inspeccionada...
+			if (cachedQueries[esuri][hash].timestampCache < timeThreshold)
+				hashesBorrar.push(hash); // incluyo en la lista de borrrados
+		}
+		// actualizo borrados
+		summary.cleaned += hashesBorrar.length;
+		// y los borro de la caché
+		for (let i=0; i<hashesBorrar.length; i++)
+			delete cachedQueries[esuri][hashesBorrar[i]];	
+	}	
 	return summary;
 }
+
+// FUNCIÓN PARA LIMPIAR LA CACHÉ DE CONSULTAS POR ENDPOINT
+// se usa en las escrituras para limpiar las consultas cacheadas
+function cleanCachedQueriesEndpoint(esuri) {
+	cachedQueries[esuri] = {};
+}
+
 
 // FUNCIÓN GENERAL PARA OBTENER DATOS
 // obtengo datos de un conjunto de iris de un determinado tipo
@@ -553,5 +569,6 @@ module.exports = {
 	testEndpoint,
 	answerQuery,
 	getData,
-	cleanCachedQueries
+	cleanCachedQueries,
+	cleanCachedQueriesEndpoint
 }

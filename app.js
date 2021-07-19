@@ -50,6 +50,7 @@ function initServer() {
 	postRoutes['/users'] = apiManager.postUser; // para solicitar creación usuario
 	postRoutes['/apis/:apiId/tokens'] = apiManager.regenerateTokens; // para regenerar los tokens de acceso
 	postRoutes['/apis/:apiId/dumps'] = apiManager.createDump;
+	postRoutes['/apis/:apiId/cleanCache'] = apiManager.cleanCacheApi;	
 	
 	// PUT routes
 	putRoutes['/users/:login'] = apiManager.putUser;
@@ -153,6 +154,9 @@ function initServer() {
 			
 			// preparo visitante para las analíticas
 			let visitor = univAnalytics(config.gaTrackId, ida, {strictCidFormat: false});
+			
+			// 07-07-2021 override de la IP para los analytics (que se anonimizará)
+			visitor.set('uip', logmess.clientIP);
 			
 			// preparo datos evento
 			let evdata = {};

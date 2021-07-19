@@ -32,6 +32,9 @@ async function putResource(iri, objr, mel, api, qinfo) {
 		numberOfQueries: 0
 	};
 	
+	// inicializo uris de los endpoints para borrar las consutas de la caché
+	let esuris = {};
+	
 	// hago las borrados
 	for (const epid in edt) {
 		if (edt[epid].length > 0) {
@@ -44,6 +47,10 @@ async function putResource(iri, objr, mel, api, qinfo) {
 			// actualizo datos a devolver
 			resp.deletedTriples += edt[epid].length;
 			resp.numberOfQueries ++;
+			
+			// incluyo uri del punto sparql
+			esuris[ep.sparqlURI] = true;
+			esuris[ep.sparqlUpdate.sparqlURI] = true;
 		}	
 	}
 	
@@ -59,7 +66,11 @@ async function putResource(iri, objr, mel, api, qinfo) {
 			// actualizo datos a devolver
 			resp.insertedTriples += eit[epid].length;
 			resp.numberOfQueries ++;
-		}	
+			
+			// incluyo uri del punto sparql
+			esuris[ep.sparqlURI] = true;
+			esuris[ep.sparqlUpdate.sparqlURI] = true;
+		}
 	}
 	
 	// borro recursos modificados en la caché
@@ -69,7 +80,11 @@ async function putResource(iri, objr, mel, api, qinfo) {
 			delete api.cache[key][borrar[key][i]];
 		}
 	}
-	
+		
+	// borro consultas de la caché para las esuris
+	for (let esuri in esuris)
+		dataManager.cleanCachedQueriesEndpoint(esuri);
+		
 	// y hemos terminado
 	return resp;
 }
@@ -102,6 +117,9 @@ async function deleteResource(iri, mel, api, qinfo) {
 		numberOfQueries: 0
 	};
 	
+	// inicializo uris de los endpoints para borrar las consutas de la caché
+	let esuris = {};
+	
 	// hago las borrados
 	for (const epid in edt) {
 		if (edt[epid].length > 0) {
@@ -114,6 +132,10 @@ async function deleteResource(iri, mel, api, qinfo) {
 			// actualizo datos a devolver
 			resp.deletedTriples += edt[epid].length;
 			resp.numberOfQueries ++;
+			
+			// incluyo uri del punto sparql
+			esuris[ep.sparqlURI] = true;
+			esuris[ep.sparqlUpdate.sparqlURI] = true;
 		}	
 	}
 		
@@ -124,6 +146,10 @@ async function deleteResource(iri, mel, api, qinfo) {
 			delete api.cache[key][borrar[key][i]];
 		}
 	}
+	
+	// borro consultas de la caché para las esuris
+	for (let esuri in esuris)
+		dataManager.cleanCachedQueriesEndpoint(esuri);
 	
 	// y hemos terminado
 	return resp;
@@ -160,6 +186,9 @@ async function patchResource(iri, patch, mel, api, qinfo) {
 		insertedTriples: 0,
 		numberOfQueries: 0
 	};
+	
+	// inicializo uris de los endpoints para borrar las consutas de la caché
+	let esuris = {};
 
 	// petición atómica: si falla algo, se haría un rollback
 	// para evitar el rollback, hago las actualizaciones en la representación del recurso (objr) 
@@ -195,6 +224,10 @@ async function patchResource(iri, patch, mel, api, qinfo) {
 				// actualizo datos a devolver
 				resp.deletedTriples += request.edt[epid].length;
 				resp.numberOfQueries ++;
+				
+				// incluyo uri del punto sparql
+				esuris[ep.sparqlURI] = true;
+				esuris[ep.sparqlUpdate.sparqlURI] = true;
 			}
 		}		
 		// hago los insert correspondientes
@@ -208,7 +241,11 @@ async function patchResource(iri, patch, mel, api, qinfo) {
 				await dataManager.answerQuery(ep.sparqlUpdate, qt, {}, qinfo); //, api.config.prefixes);
 				// actualizo datos a devolver
 				resp.insertedTriples += request.eit[epid].length;
-				resp.numberOfQueries ++;
+				resp.numberOfQueries ++;				
+				
+				// incluyo uri del punto sparql
+				esuris[ep.sparqlURI] = true;
+				esuris[ep.sparqlUpdate.sparqlURI] = true;
 			}
 		}		
 	}		
@@ -220,6 +257,10 @@ async function patchResource(iri, patch, mel, api, qinfo) {
 			delete api.cache[key][borrar[key][i]];
 		}
 	}
+	
+	// borro consultas de la caché para las esuris
+	for (let esuri in esuris)
+		dataManager.cleanCachedQueriesEndpoint(esuri);
 	
 	// y hemos terminado
 	return resp;

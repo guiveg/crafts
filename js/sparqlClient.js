@@ -10,11 +10,6 @@ async function queryEndpoint(endpoint, querytemp, pars, qinfo) {
 	let	query = mustache.render(querytemp, pars);
 	// preparo los prefijos
 	query = includePrefixes(query);
-	
-	/* TODO previo
-	// process prefixes
-	if (prefs != undefined)
-		query = processPrefixes(query, prefs);*/
 
 	// preparo URL de la consulta
 	let pdata = {};
