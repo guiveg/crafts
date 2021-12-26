@@ -24,7 +24,14 @@ Key features
 
 Installation
 ==========
-CRAFTS is a Node.js web application. Edit the `data/config.js` file to parametrize your deployment.
+CRAFTS is a Node.js web application. Edit the `data/config.js` file to parametrize your deployment (parameters are auto-descriptive).
+
+Assuming `npm` is installed, launching CRAFTS just requires the following two commands:
+
+```console
+$ npm update
+$ node app.js
+```
 
 Alternatively, you can just try a live version of CRAFTS on [https://crafts.gsic.uva.es](https://crafts.gsic.uva.es)
 
