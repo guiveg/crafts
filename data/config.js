@@ -36,7 +36,7 @@ const config = {
  	},
  	
  	// timespan of a resource in the cache
- 	daysCache: 14,
+ 	daysCache: 3,
  	millisecsCleanCache: 60*60*1000, // every hour
  	
  	// google analytics
