@@ -7,6 +7,10 @@ CRAFTS automatically handles the translation of API calls into SPARQL queries, d
 The API of CRAFTS is uniform, domain-independent, and described with the OpenAPI specification. 
 
 
+Please cite CRAFTS as:
+
+> G. Vega-Gorgojo, "CRAFTS: Configurable REST APIs for Triple Stores," in IEEE Access, vol. 10, pp. 32426-32441, 2022, doi: 10.1109/ACCESS.2022.3160610.
+
 Target audience
 ==========
 * Web developers struggling with Linked Open Data
