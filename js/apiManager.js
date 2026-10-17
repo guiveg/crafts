@@ -1,5 +1,4 @@
 const fs = require('fs'); // para servir ficheros de dumps
-const _ = require('underscore');
 const { v4: uuidv4 } = require('uuid');
 const nodemailer = require("nodemailer");
 
@@ -9,6 +8,7 @@ const modelValidator = require('./modelValidator'); // para validar las configur
 const dataManager = require('./dataManager'); // para los datos
 const dumpManager = require('./dumpManager'); // para los dumps
 const resourceUpdater = require('./resourceUpdater'); // para actualizar los recursos
+const sparqlClient = require('./sparqlClient'); // para eliminar los limiters (en caso de mod de API)
 const util = require('./util'); // para ficheros
 
 const dirApiPath = './' + config.apisPath + '/';
@@ -16,10 +16,10 @@ const dirUsersPath = './' + config.dataPath + '/';
 const usersFilePath = dirUsersPath + config.usersFile;
 
 // objeto con todas las APIs (accesibles por clave)
-var users = {};
+var users = Object.create(null);
 
 // objeto con todas las APIs (accesibles por clave)
-var apis = {};
+const apis = Object.create(null);
 
 /** 
  * @swagger 
@@ -87,6 +87,9 @@ var apis = {};
  *               created:
  *                 type: string
  *                 format: date-time
+ *               modified:
+ *                 type: string
+ *                 format: date-time
  *               readToken:
  *                 type: string
  *               writeToken:
@@ -111,6 +114,29 @@ var apis = {};
  *       properties:
  *         apiId:
  *           type: string
+ *         versionCode:
+ *           type: integer
+ *         options:
+ *           type: object
+ *           additionalProperties: false
+ *           properties:
+ *             compactQueries:
+ *               type: boolean
+ *             singletonArrays:
+ *               type: string
+ *               enum: [collapse, keep]
+ *             cache:
+ *               type: object
+ *               additionalProperties: false
+ *               properties:
+ *                 resourceTTL:
+ *                   type: integer
+ *                 resourceSliding:
+ *                   type: boolean
+ *                 queryTTL:
+ *                   type: integer
+ *                 querySliding:
+ *                   type: boolean
  *         endpoints:
  *           type: array
  *           items:
@@ -128,6 +154,12 @@ var apis = {};
  *               httpMethod:
  *                 type: string
  *                 enum: [GET, POST]
+ *               maxConcurrentQueries:
+ *                 type: integer
+ *               resourcePage:
+ *                 type: integer
+ *               limit:
+ *                 type: integer
  *               authInfo:
  *                 type: object
  *                 additionalProperties: false
@@ -144,8 +176,6 @@ var apis = {};
  *                 type: object
  *                 additionalProperties: false
  *                 properties:
- *                   id:
- *                     type: string
  *                   sparqlURI:
  *                     type: string
  *                     format: uri
@@ -176,6 +206,8 @@ var apis = {};
  *             properties:
  *               id:
  *                 type: string
+ *               extends:
+ *                 type: string
  *               types:
  *                 type: array
  *                 items:
@@ -192,6 +224,16 @@ var apis = {};
  *                       type: array
  *                       items:
  *                         type: string
+ *                     altResult:
+ *                       type: string
+ *                     altVariable:
+ *                       type: string
+ *                     orderBy:
+ *                       type: string
+ *                     limit:
+ *                       type: number
+ *                     offset:
+ *                       type: number
  *                     targetId:
  *                       type: string
  *                     embed:
@@ -199,7 +241,7 @@ var apis = {};
  *                     writeonly:
  *                       type: boolean
  *                   required: [label, endpoint]
- *               dprops:
+ *               props:
  *                 type: array
  *                 items:
  *                   type: object
@@ -209,43 +251,107 @@ var apis = {};
  *                       type: string
  *                     endpoint:
  *                       type: string
- *                     iri:
+ *                     proptype:
+ *                       type: string
+ *                       enum: [datatype, object]
+ *                     propiri:
  *                       type: string
  *                       format: uri
- *                     restrictions:
- *                       type: array
- *                       items:
- *                         type: string
- *                     writeonly:
- *                       type: boolean
- *                   required: [label, endpoint, iri]
- *               oprops:
- *                 type: array
- *                 items:
- *                   type: object
- *                   additionalProperties: false
- *                   properties:
- *                     label:
+ *                     propexpr:
  *                       type: string
- *                     endpoint:
- *                       type: string
- *                     iri:
- *                       type: string
- *                       format: uri
- *                     inv:
- *                       type: boolean
- *                     restrictions:
- *                       type: array
- *                       items:
- *                         type: string
  *                     targetId:
  *                       type: string
  *                     embed:
  *                       type: boolean
  *                     writeonly:
  *                       type: boolean
- *                   required: [label, endpoint, iri]
- *             required: [id, types, dprops, oprops]
+ *                     restrictions:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     altResult:
+ *                       type: string
+ *                     altVariable:
+ *                       type: string
+ *                     orderBy:
+ *                       type: string
+ *                     limit:
+ *                       type: number
+ *                     offset:
+ *                       type: number
+ *                   required: [label, endpoint, proptype]
+ *                   oneOf:
+ *                     - properties:
+ *                         propiri:
+ *                           type: string
+ *                           format: uri
+ *                       required:
+ *                         - propiri
+ *                     - properties:
+ *                         propexpr:
+ *                           type: string
+ *                       required:
+ *                         - propexpr
+ *               joins:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   additionalProperties: false
+ *                   properties:
+ *                     label:
+ *                       type: string
+ *                     endpoint:
+ *                       type: string
+ *                     source:
+ *                       type: string
+ *                     inputRegex:
+ *                       type: string
+ *                     inputRegexGroup:
+ *                       type: integer
+ *                     inputTransform:
+ *                       type: string
+ *                     proptype:
+ *                       type: string
+ *                       enum: [datatype, object]
+ *                     propiri:
+ *                       type: string
+ *                       format: uri
+ *                     propexpr:
+ *                       type: string
+ *                     targetId:
+ *                       type: string
+ *                     embed:
+ *                       type: boolean
+ *                     nodistinct:
+ *                       type: boolean
+ *                     restrictions:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     altResult:
+ *                       type: string
+ *                     altVariable:
+ *                       type: string
+ *                     orderBy:
+ *                       type: string
+ *                     limit:
+ *                       type: number
+ *                   required: [label, endpoint, source, proptype]
+ *                   oneOf:
+ *                     - properties:
+ *                         propiri:
+ *                           type: string
+ *                           format: uri
+ *                       required:
+ *                         - propiri
+ *                     - properties:
+ *                         propexpr:
+ *                           type: string
+ *                       required:
+ *                         - propexpr
+ *               notest:
+ *                 type: boolean
+ *             required: [id]
  *         queryTemplates:
  *           type: array
  *           items:
@@ -259,6 +365,8 @@ var apis = {};
  *               description:
  *                 type: string
  *               template:
+ *                 type: string
+ *               define:
  *                 type: string
  *               variables:
  *                 type: array
@@ -274,12 +382,14 @@ var apis = {};
  *                       type: string
  *                     type:
  *                       type: string
- *                       enum: [iri, string, number, integer, boolean]
+ *                       enum: [iri, string, number, integer, boolean, 'iri[]', 'string[]', 'number[]', 'integer[]', 'boolean[]']
  *                     optional:
  *                       type: boolean
  *                   required: [label, type]
+ *               notest:
+ *                 type: boolean
  *             required: [id, endpoint, template, variables, parameters]
- *       required: [apiId, endpoints, model, queryTemplates]
+ *       required: [apiId, versionCode, endpoints, model, queryTemplates]
  *
  *     ApiResponse:
  *       type: object
@@ -412,7 +522,7 @@ async function init() {
 		logger.info('There is a users file');
 		try {
 			users = await util.loadFile(usersFilePath);
-			logger.info('Users loaded');
+			logger.info('Users loaded');			
 			// una vez cargado el fichero de usuarios, inicializo las APIS
 			for (let login in users) {
 				const user = users[login];				
@@ -423,14 +533,14 @@ async function init() {
 						let confExiste = await util.checkFile(path);
 						if (confExiste) {
 							// cargo api del fichero
-							let apiConfig = await util.loadFile(path);
+							const apiConfig = await util.loadFile(path);
 							// analizo si la api cargada es correcta
-							if (apiConfig.apiId != undefined && apiConfig.apiId === apiId) {			
+							if (apiConfig.apiId != null && apiConfig.apiId === apiId) {			
 								// 2021-07-11 dejo de validar el modelo al iniciar, se supone que se hizo bien en su momento
 								// etiqueta correcta... pido validación del modelo
 								//await modelValidator.validateAPIConfig(apiConfig, {quuid: 'init', apiId: apiId});
-								// configuración validada => creo la API
-								createAPI(apiId, apiConfig);
+								// configuración validada => creo la API y guardo
+								apis[apiId] = createAPI(apiConfig);
 								// inicializo en el dumpManager
 								await dumpManager.initApi(apiId);								
 								// ha ido bien
@@ -471,17 +581,48 @@ async function init() {
 	}
 }
 
-
-function createAPI(apiId, apiConfig) {
-	// inicializo la api
-	apis[apiId] = {};
-	// guardo la configuración de la API
-	apis[apiId].config = apiConfig;
-	// inicializo la caché de la API
-	apis[apiId].cache = {};
-	_.each(apis[apiId].config.model, (el) => {
-		apis[apiId].cache[el.id] = {};	
-	});
+function createAPI(config, test) {
+	// copia profunda de la configuración
+	const apiConfig = structuredClone(config);
+	if (test) {
+		// en modo test cambio el id
+		apiConfig.apiId = `${apiConfig.apiId}_testing`;
+		// y desactivo la compactación de consultas
+		apiConfig.options ??= {};
+		apiConfig.options.compactQueries = false;
+	}
+ 	// inicializo la api con la configuración (inmutable)
+	const api = {
+		config: Object.freeze(apiConfig)
+	};	
+	// inicializo modelById
+	api.modelById = Object.create(null);
+	for (const el of api.config.model)
+		api.modelById[el.id] = el;
+	// inicializo qtempsById
+	api.qtempsById = Object.create(null);
+	for (const qt of api.config.queryTemplates)
+		api.qtempsById[qt.id] = qt;
+	// inicializo endpointsById
+	api.endpointsById = Object.create(null);
+	for (const ep of api.config.endpoints) {
+		api.endpointsById[ep.id] = ep;
+		// oct-26: si hay sparqlUpdate, incluyo endpoint de actualización normalizado
+		if (ep.sparqlUpdate) {
+			const epu = {
+				...ep.sparqlUpdate,
+				id: ep.id + "_update"
+			}
+			// replico info del endpoint contenedor si no estuviera incluida
+			epu.sparqlURI ??= ep.sparqlURI;
+			epu.graphURI ??= ep.graphURI;
+			epu.httpMethod ??= ep.httpMethod;
+			epu.authInfo ??= ep.authInfo;
+			// guardo
+			api.endpointsById[epu.id] = epu;
+		}
+	}
+	return api;
 }
 
 
@@ -507,22 +648,12 @@ function retrieveApiOwner(apiId) {
 				return login;
 		}
 	}
-	return undefined; // si no hay coincidencia
-}
-function retrieveApiOwner(apiId) {
-	for (let login in users) {
-		const user = users[login];
-		for (let evapid in user.apis) {
-			if (evapid === apiId)
-				return login;
-		}
-	}
-	return undefined; // si no hay coincidencia
+	return null; // si no hay coincidencia
 }
 function validarTokenApi(token, apiId, escritura) {
 	// obtengo owner de la api
 	const owner = retrieveApiOwner(apiId);
-	if (owner != undefined) {
+	if (owner != null) {
 		// comparo primero con el token de escritura (válido también para lectura)
 		if (token === users[owner].apis[apiId].writeToken)
 			return true;
@@ -562,7 +693,7 @@ function validarTokenApi(token, apiId, escritura) {
 async function getUsers(req, res, next) {
 	// sólo acceso root
 	if (req.login !== 'root') {
-		objresp = {};
+		const objresp = {};
 		objresp.status = 403;
 		objresp.message = 'Forbidden';
 		res.errorMessage = objresp.message;
@@ -607,13 +738,13 @@ async function getUsers(req, res, next) {
   */ 
 async function postUser(req, res, next) {
 	// extraigo la info de usuario (ya validado por openApiValidator)
-	let userInfo = req.body;
+	const userInfo = req.body;
 		
 	// pregenero objeto de respuesta
-	let objresp = {};	
+	const objresp = {};	
 	
 	// compruebo si ya existe el login 
-	if (users[userInfo.login] != undefined) {
+	if (users[userInfo.login] != null) {
 		objresp.status = 400;
 		objresp.message = 'Login already exists';
 		res.errorMessage = objresp.message;
@@ -750,16 +881,16 @@ async function activateUser(req, res, next) {
 	const actKey = req.params.actKey;
 	
 	// inicializo objeto respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si existe el usuario
-	if (users[login] == undefined) {
+	if (users[login] == null) {
 		// no existe...
 		objresp.status = 404;
 		objresp.message = 'User not found';
 		res.errorMessage = objresp.message;
 	} // compruebo si el usuario requiere activación
-	else if (users[login].activationKey == undefined) {
+	else if (users[login].activationKey == null) {
 		// ya activado...
 		objresp.status = 400;
 		objresp.message = 'Invalid request. User already activated';
@@ -837,7 +968,7 @@ async function getUser(req, res, next) {
 	// extraigo login
 	const login = req.params.login;
 	// inicializo objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	res.type('json');
 	// compruebo si tiene permiso
 	if (req.login !== 'root' && req.login !== login) {
@@ -845,7 +976,7 @@ async function getUser(req, res, next) {
 		objresp.status = 403;
 		objresp.message = 'Forbidden';
 		res.errorMessage = objresp.message;
-	} else if (users[login] == undefined) { // compruebo si existe el usuario
+	} else if (users[login] == null) { // compruebo si existe el usuario
 		// no existe...
 		objresp.status = 404;
 		objresp.message = 'User not found';
@@ -912,10 +1043,10 @@ async function putUser(req, res, next) {
 	// extraigo login
 	const login = req.params.login;
 	// extraigo la info de usuario (ya validado por openApiValidator)
-	let userInfo = req.body;
+	const userInfo = req.body;
 		
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso
 	if (req.login !== 'root' && req.login !== login) {
@@ -928,7 +1059,7 @@ async function putUser(req, res, next) {
 	}
 
 	// compruebo que ya exista el login 
-	if (users[login] == undefined) {
+	if (users[login] == null) {
 		objresp.status = 404;
 		objresp.message = 'User not found';
 		res.errorMessage = objresp.message;
@@ -983,7 +1114,6 @@ async function putUser(req, res, next) {
 }
 
 
-
 /** 
   * @swagger 
   * /users/{login}: 
@@ -1025,7 +1155,7 @@ async function deleteUser(req, res, next) {
 	const login = req.params.login;
 		
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso
 	if (login === 'root' || (req.login !== 'root' && req.login !== login) ) {
@@ -1038,7 +1168,7 @@ async function deleteUser(req, res, next) {
 	}
 
 	// compruebo que ya exista el login 
-	if (users[login] == undefined) {
+	if (users[login] == null) {
 		objresp.status = 404;
 		objresp.message = 'User not found';
 		res.errorMessage = objresp.message;
@@ -1087,7 +1217,6 @@ async function deleteUser(req, res, next) {
 
 
 
-
 // FUNCIONES PARA DEVOLVER EL LISTADO DE APIS Y CADA API (su configuración)
 
 /** 
@@ -1125,10 +1254,10 @@ async function deleteUser(req, res, next) {
   */ 
 function getApis(req, res, next) {
 	// devuelvo las apis registradas
-	let salida = [];	
+	const salida = [];	
 	for (let apiId in apis) {
 		// para cada api registrada...
-		let apires = {
+		const apires = {
 			"apiId": apiId,
 			"url": config.scheme + '://' + config.authority
 				+ config.prepath + '/' + config.apisPath + '/' + apiId
@@ -1184,11 +1313,11 @@ async function getApi(req, res, next) {
 	const apiId = req.params.apiId;
 	
 	// si hay token hay que mirar si es válido
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, false);
 		if (!valido) {
 			// sin autorización
-			let objresp = {};
+			const objresp = {};
 			objresp.status = 401;
 			objresp.message = 'Unauthorized. Your token is not valid';
 			res.errorMessage = objresp.message;
@@ -1198,9 +1327,9 @@ async function getApi(req, res, next) {
 	}
 	
 	// compruebo si existe la api
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe...
-		let objresp = {};
+		const objresp = {};
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
 		res.errorMessage = objresp.message;
@@ -1211,21 +1340,21 @@ async function getApi(req, res, next) {
 	// todo ok, devuelvo la configuración
 	res.type('json');
 	// sólo muestro info acceso endpoints si es el dueño de la API o root
-	if (req.token != undefined || (req.login !== 'root' && retrieveApiOwner(apiId) !== req.login) ) {
+	if (req.token != null || (req.login !== 'root' && retrieveApiOwner(apiId) !== req.login) ) {
 		// hay que borrar authinfo en la respuesta...
-		const eps = apis[apiId].config.endpoints; // guardo para luego
-		apis[apiId].config.endpoints =[];
-		// rehago info endpoints
-		for (let i=0; i<eps.length; i++) {
-			let ep = _.omit(eps[i], 'authInfo'); // clon sin authInfo			
-			if (ep.sparqlUpdate != undefined)
-				ep.sparqlUpdate = _.omit(ep.sparqlUpdate, 'authInfo'); // clon sin authInfo			
-			apis[apiId].config.endpoints.push(ep);
-		}
+		const config = {
+			...apis[apiId].config,
+			endpoints: apis[apiId].config.endpoints.map(endpoint => {
+				const { authInfo, ...ep } = endpoint;
+				if (ep.sparqlUpdate) {
+					const { authInfo, ...sparqlUpdate } = ep.sparqlUpdate;
+					ep.sparqlUpdate = sparqlUpdate;
+				}
+			return ep;
+			})
+		};
 		// mando la api
-		res.send( apis[apiId].config );
-		// restauro la info de endpoints
-		apis[apiId].config.endpoints = eps;	
+		res.send(config);
 	}
 	else // devuelvo la API completa
 		res.send( apis[apiId].config );
@@ -1290,13 +1419,13 @@ async function putApi(req, res, next) {
 	const apiconf = req.body;
 		
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
-	// obtengo owner de la API (undefined si no existe)
-	const owner = retrieveApiOwner(apiId);
+	// obtengo owner de la API (si no existe lo asigno a req.login)
+	const owner = retrieveApiOwner(apiId) ?? req.login;
 	
 	// compruebo si tiene permiso para seguir
-	if (req.login !== 'root' && owner != undefined && owner !== req.login) {
+	if (req.login !== 'root' && owner !== req.login) {
 		// ni es root, ni la API está por definir, ni es el dueño de la API
 		objresp.status = 403;
 		objresp.message = 'Forbidden';
@@ -1305,25 +1434,40 @@ async function putApi(req, res, next) {
 		return;		
 	}	
 	
-	// analizo si la api cargada es correcta
-	if (apiconf.apiId != undefined && apiconf.apiId === apiId) {
-		// etiqueta correcta... pido validación del modelo
-		try {
-			await modelValidator.validateAPIConfig(apiconf, {quuid: req.quuid, apiId: apiId});
-		} catch(err) {
-			objresp.status = 400;
-			objresp.message = 'Invalid API configuration: ' + err.message;
-			res.errorMessage = objresp.message;
-			res.status(objresp.status).send(objresp);
-			return;		
-		}
-	} else {
+	// compruebo si apiId es correcto
+	if (apiconf.apiId == null || apiconf.apiId !== apiId) {
 		objresp.status = 400;
 		objresp.message = 'Invalid API configuration: the configuration has a wrong apiId';
 		res.errorMessage = objresp.message;
 		res.status(objresp.status).send(objresp);
 		return;
 	}
+	
+	// creamos una api de test a partir de la configuración y la validamos a ver si es correcta
+	const apitest = createAPI(apiconf, true);
+	try {
+		await modelValidator.validateApi(apitest, {quuid: req.quuid, apiId: apitest.config.apiId});		
+	} catch(err) {
+		objresp.status = 400;
+		objresp.message = 'Invalid API configuration: ' + err.message;
+		res.errorMessage = objresp.message;
+		res.status(objresp.status).send(objresp);
+		//console.error(err.stack);
+		return;		
+	}
+	
+	// ha ido bien, borramos la caché y los limiters de la api de test
+	dataManager.cleanAPICache(apitest.config.apiId);
+	sparqlClient.removeLimiters(apitest.config.apiId);
+	
+	// lo mismo si existía una api previa
+	if (apis[apiId] != null) {
+		dataManager.cleanAPICache(apiId);
+		sparqlClient.removeLimiters(apiId);
+	}
+	
+	// ahora creamos la api que vamos a guardar
+	const api = createAPI(apiconf);
 	
 	// guardamos la configuración en un fichero
 	try {
@@ -1337,40 +1481,43 @@ async function putApi(req, res, next) {
 		res.status(objresp.status).send(objresp);
 		return;
 	}
-
-	// opción por defecto es una actualización
-	objresp.status = 200;
-	objresp.message = 'API "' + apiId + '" has been updated';
 	
 	// si es una api nueva...
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		objresp.status = 201;
-		objresp.message = 'API "' + apiId + '" has been created';
-		
+		objresp.message = 'API "' + apiId + '" has been created';		
 		// guardo referencia a la api con su dueño y genero tokens de acceso
-		users[req.login].apis[apiId] = {
+		users[owner].apis[apiId] = {
 			created: new Date().toISOString(),
 			readToken: uuidv4(), 
 			writeToken:	uuidv4()
 		};
-		// hay que guardar fichero de usuarios y pedir inicialización al dumpManager
-		try {
-			// guardo el fichero de usuarios
-			await util.saveFile(usersFilePath, users);
-			// inicialización en el dumpManager
-			await dumpManager.initApi(apiId);			
-		} catch(err) {
-			// error en el guardado de la lista
-			objresp.status = 500;
-			objresp.message = 'API creation error: ' + err.message;
-			res.errorMessage = objresp.message;
-			res.status(objresp.status).send(objresp);
-			return;
-		}
+	}
+	else {	// es una actualización
+		objresp.status = 200;
+		objresp.message = 'API "' + apiId + '" has been updated';
+		// añado campo de modified
+		users[owner].apis[apiId].modified = new Date().toISOString();
 	}
 	
-	// configuración validada => creo la API (y piso lo que había si es una actualización)
-	createAPI(apiId, apiconf);
+	// hay que guardar fichero de usuarios y pedir inicialización al dumpManager
+	try {
+		// guardo el fichero de usuarios
+		await util.saveFile(usersFilePath, users);
+		// inicialización en el dumpManager si es una api nueva
+		if (apis[apiId] == null)
+			await dumpManager.initApi(apiId);			
+	} catch(err) {
+		// error en el guardado de la lista
+		objresp.status = 500;
+		objresp.message = 'API creation error: ' + err.message;
+		res.errorMessage = objresp.message;
+		res.status(objresp.status).send(objresp);
+		return;
+	}
+	
+	// configuración validada => guardo la API (y piso lo que había si es una actualización)
+	apis[apiId] = api;
 	logger.info(objresp.message);
 		
 	// preparo la ruta y url para incluir en objresp
@@ -1431,16 +1578,16 @@ async function regenerateTokens(req, res, next) {
 	const apiId = req.params.apiId;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso
 	const owner = retrieveApiOwner(apiId);
-	if (req.login !== 'root' && owner != undefined && owner !== req.login) {
+	if (req.login !== 'root' && owner != null && owner !== req.login) {
 		// ni es root, ni la API está por definir, ni es el dueño de la API
 		objresp.status = 403;
 		objresp.message = 'Forbidden';
 		res.errorMessage = objresp.message;
-	} else if (apis[apiId] == undefined) { // // compruebo si existe la api
+	} else if (apis[apiId] == null) { // // compruebo si existe la api
 		// no existe...
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -1511,11 +1658,11 @@ async function cleanCacheApi(req, res, next) {
 	const apiId = req.params.apiId;
 	
 	// inicializo objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso
 	const owner = retrieveApiOwner(apiId);
-	if (req.login !== 'root' && owner != undefined && owner !== req.login) {
+	if (req.login !== 'root' && owner != null && owner !== req.login) {
 		// ni es root, ni la API está por definir, ni es el dueño de la API
 		objresp.status = 403;
 		objresp.message = 'Forbidden';
@@ -1525,31 +1672,24 @@ async function cleanCacheApi(req, res, next) {
 	}
 	
 	// compruebo si existe la api
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe...
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
 		res.errorMessage = objresp.message;
 		res.status(objresp.status).send(objresp);
-	} else { 
-		// existe, limpio la caché
-		apis[apiId].cache = {};
-		_.each(apis[apiId].config.model, (el) => {
-			apis[apiId].cache[el.id] = {};	
-		});
-		
-		// limpio también la caché de consultas con los endpoints de la API
-		// inicializo uris de los endpoints para borrar las consutas de la caché
-		let esuris = {};
-		_.each(apis[apiId].config.endpoints, (ep) => {
-			esuris[ep.sparqlURI] = true;
-			if (ep.sparqlUpdate != undefined)
-				esuris[ep.sparqlUpdate.sparqlURI] = true;
-		});
-	
-		// borro consultas de la caché para las esuris
-		for (let esuri in esuris)
-			dataManager.cleanCachedQueriesEndpoint(esuri);	
+	}
+	else {
+		// existe, solicito al dataManager
+		try {
+			dataManager.cleanAPICache(apiId);
+		} catch(err) {
+			objresp.status = 500;
+			objresp.message = 'Clean cache error: ' + err.message;
+			res.errorMessage = objresp.message;
+			res.status(objresp.status).send(objresp);
+			//console.error(err.stack);
+		}
 			
 		// la limpieza de la caché ha ido bien, devuelvo resultado
 		objresp.status = 200;
@@ -1605,11 +1745,11 @@ async function deleteApi(req, res, next) {
 	const apiId = req.params.apiId;
 	
 	// inicializo objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso
 	const owner = retrieveApiOwner(apiId);
-	if (req.login !== 'root' && owner != undefined && owner !== req.login) {
+	if (req.login !== 'root' && owner != null && owner !== req.login) {
 		// ni es root, ni la API está por definir, ni es el dueño de la API
 		objresp.status = 403;
 		objresp.message = 'Forbidden';
@@ -1619,7 +1759,7 @@ async function deleteApi(req, res, next) {
 	}
 	
 	// compruebo si existe la api
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe...
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -1629,7 +1769,10 @@ async function deleteApi(req, res, next) {
 		try {
 			// elimino toda la información de la API
 			delete apis[apiId];
-			
+					
+			// borro los limiters de la API
+			sparqlClient.removeLimiters(apiId);
+	
 			// elimino fichero con la configuración
 			const path = dirApiPath + apiId + ".json";
 			await util.deleteFile(path);		
@@ -1638,7 +1781,7 @@ async function deleteApi(req, res, next) {
 			await dumpManager.deleteApi(apiId);
 			
 			// borro API de los usuarios y actualizo fichero usuarios			
-			if (owner != undefined) {
+			if (owner != null) {
 				delete users[owner].apis[apiId];
 				await util.saveFile(usersFilePath, users);
 			}
@@ -1722,6 +1865,12 @@ async function deleteApi(req, res, next) {
   *           application/json:
   *             schema: 
   *               $ref: '#/components/schemas/ApiResponse'
+  *       '429': 
+  *         description: Too Many Requests
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
   */
 async function getResource(req, res, next) {
 	// extraigo parámetros de la URL
@@ -1730,10 +1879,10 @@ async function getResource(req, res, next) {
 	const iri = req.query.iri;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};	
+	const objresp = {};	
 	
 	// si hay token hay que mirar si es válido para lectura
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, false);
 		if (!valido) {
 			// sin autorización
@@ -1746,7 +1895,7 @@ async function getResource(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -1756,8 +1905,8 @@ async function getResource(req, res, next) {
 	} 
 	
 	// compruebo que exista el id correspondiente en el modelo de la configuración	
-	const mel = _.find(apis[apiId].config.model, (el) => el.id === id);
-	if (mel != undefined) {
+	const mel = apis[apiId].modelById[id];
+	if (mel != null) {
 		// compruebo que la iri esté bien formada
 		try {
 			// lanza una excepción si iri no está bien formada: https://developer.mozilla.org/en-US/docs/Web/API/URL/URL
@@ -1771,30 +1920,31 @@ async function getResource(req, res, next) {
 		}
 		
 		// petición correcta, preparo objeto con la petición
-		let obj = {};
-		obj.api = apis[apiId]; // meto la API completa
-		obj.id = id;
-		obj.iris = [];
-		obj.iris.push(iri);
+		const obj = {
+			api: apis[apiId], // meto la API completa
+			id: id,
+			iris: [iri]
+		};
 		
 		try {
 			// recupero datos
-			let datos = await dataManager.getData(obj, {quuid: req.quuid, apiId: apiId});
+			const datos = await dataManager.getData(obj, {quuid: req.quuid, apiId});
 			// incorporo consultas para el log
 			res.numberOfQueries = datos.numberOfQueries;
 			res.allQueries = datos.allQueries;			
 			// si hay salida la devuelvo
-			if (datos.data != undefined && datos.data.length == 1) {
+			if (datos.data != null && datos.data.length == 1) {
 				res.type('json');
 				res.send( datos.data[0] );
 				return;
-			}	
+			}
 		} catch(err) {
-			// si no hacemos más comprobaciones de la petición habrá que asumir que el error es del servidor
-			objresp.status = 500;
+			// compruebo si es error 429, en otro caso habrá que asumir que el error es del servidor
+			objresp.status = err.code == 429? 429 : 500;
 			objresp.message = 'Extraction error: ' + err.message;
 			res.errorMessage = objresp.message;
 			res.status(objresp.status).send(objresp);
+			//console.error(err.stack);
 			return;
 		}
 	} else {
@@ -1890,18 +2040,24 @@ async function getResource(req, res, next) {
   *           application/json:
   *             schema: 
   *               $ref: '#/components/schemas/ApiResponse'
+  *       '429': 
+  *         description: Too Many Requests
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
   */
 async function getResources(req, res, next) {
 	// extraigo parámetros de la URL
 	const apiId = req.params.apiId;
 	const id = req.query.id;
-	let iris = req.query.iris;
+	const iris = req.query.iris;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// si hay token hay que mirar si es válido para lectura
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, false);
 		if (!valido) {
 			// sin autorización
@@ -1914,7 +2070,7 @@ async function getResources(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -1923,13 +2079,13 @@ async function getResources(req, res, next) {
 		return;
 	}
 		
-	// compruebo que exista el id correspondiente en el modelo de la configuración	
-	let mel = _.find(apis[apiId].config.model, (el) => el.id === id);
-	if (mel != undefined) {
+	// compruebo que exista el id correspondiente en el modelo de la configuración
+	const mel = apis[apiId].modelById[id];
+	if (mel != null) {
 		// el tipo es correcto, miro si hay namespace
 		const ns = req.query.ns;
 		const nspref = req.query.nspref;
-		if (ns != undefined && nspref != undefined) {
+		if (ns != null && nspref != null) {
 			// hago las sustituciones que hagan falta
 			const nsprefplus = nspref + ':';
 			for (let i=0; i<iris.length; i++) {
@@ -1940,9 +2096,9 @@ async function getResources(req, res, next) {
 		
 		// compruebo que las iris estén bien formadas
 		try {
-			for (let i=0; i<iris.length; i++) {
+			for (const iri of iris) {
 				// lanza una excepción si iri no está bien formada: https://developer.mozilla.org/en-US/docs/Web/API/URL/URL
-				new URL(iris[i]);
+				new URL(iri);
 			}
 		} catch(error) {
 			objresp.status = 400;
@@ -1953,29 +2109,31 @@ async function getResources(req, res, next) {
 		}			
 		
 		// petición correcta, preparo objeto con la petición
-		let obj = {};
-		obj.api = apis[apiId]; // meto la API completa
-		obj.id = id;
-		obj.iris = iris;	
+		const obj = {
+			api: apis[apiId], // meto la API completa
+			id: id,
+			iris: iris
+		};		
 
 		try {
 			// recupero datos
-			let datos = await dataManager.getData(obj, {quuid: req.quuid, apiId: apiId});
+			const datos = await dataManager.getData(obj, {quuid: req.quuid, apiId});
 			// incorporo consultas para el log
 			res.numberOfQueries = datos.numberOfQueries;
 			res.allQueries = datos.allQueries;			
 			// si hay salida la devuelvo
-			if (datos.data != undefined) {
+			if (datos.data != null) {
 				res.type('json');
 				res.send( datos.data );
 				return;
 			}	
-		} catch(err) {
-			// si no hacemos más comprobaciones de la petición habrá que asumir que el error es del servidor
-			objresp.status = 500;
+		} catch(err) {			
+			// compruebo si es error 429, en otro caso habrá que asumir que el error es del servidor
+			objresp.status = err.code == 429? 429 : 500;
 			objresp.message = 'Extraction error: ' + err.message;
 			res.errorMessage = objresp.message;
 			res.status(objresp.status).send(objresp);
+			//console.error(err.stack);
 			return;
 		}
 	} else {
@@ -2074,6 +2232,12 @@ async function getResources(req, res, next) {
   *           application/json:
   *             schema: 
   *               $ref: '#/components/schemas/ApiResponse'
+  *       '429': 
+  *         description: Too Many Requests
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
   */
 async function putResource(req, res, next) {
 	// extraigo parámetros de la URL
@@ -2082,10 +2246,10 @@ async function putResource(req, res, next) {
 	const iri = req.query.iri;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 		
 	// compruebo si tiene permiso (si hay token hay que mirar si es válido)
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, true); // hace falta token de escritura
 		if (!valido) {
 			// sin autorización
@@ -2105,7 +2269,7 @@ async function putResource(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -2115,12 +2279,12 @@ async function putResource(req, res, next) {
 	} 
 	
 	// compruebo que exista el id correspondiente en el modelo de la configuración	
-	const mel = _.find(apis[apiId].config.model, (el) => el.id === id);
-	if (mel != undefined) {		
+	const mel = apis[apiId].modelById[id];
+	if (mel != null) {		
 		// obtengo el objeto del body y lo valido
 		const objr = req.body;		
 		try {
-			modelValidator.validateResource(iri, objr, mel, apis[apiId].config, "root");
+			modelValidator.validateResource(iri, objr, mel, apis[apiId], "root");
 		} catch(error) {
 			objresp.status = 400;
 			objresp.message = 'Invalid request: ' + error.message;
@@ -2132,7 +2296,9 @@ async function putResource(req, res, next) {
 		// ha pasado el validador, la actualización debería poder hacerse		
 		try {
 			// pido la actualización
-			let datos = await resourceUpdater.putResource(iri, objr, mel, apis[apiId], {quuid: req.quuid, apiId: apiId});
+			// oct-26: indico que no es cacheable
+			const datos = await resourceUpdater.putResource(iri, objr, mel, apis[apiId],
+				{quuid: req.quuid, apiId, nocache: true});
 			// meto info de las triplas borradas/creadas y consultas
 			res.numberOfQueries = datos.numberOfQueries;
 			res.deletedTriples = datos.deletedTriples;
@@ -2146,7 +2312,7 @@ async function putResource(req, res, next) {
 			res.location(loc); 
 			res.loc = loc;
 			// pongo status, message y mando						
-			if (datos.deletedTriples == 0) {
+			if (datos.deletedTriples === 0) {
 				objresp.status = 201;
 				objresp.message = 'Resource created. #queries: ' + datos.numberOfQueries 
 					+ '. #inserted triples: ' + datos.insertedTriples;
@@ -2163,8 +2329,9 @@ async function putResource(req, res, next) {
 			//dataManager.cleanCachedQueries(new Date().getTime());
 			return;			
 		} catch(err) {
-			// si no hacemos más comprobaciones de la petición habrá que asumir que el error es del servidor
-			objresp.status = 500;
+			//console.error(err.stack);
+			// compruebo si es error 429, en otro caso habrá que asumir que el error es del servidor
+			objresp.status = err.code == 429? 429 : 500;
 			objresp.message = 'Resource create or replace error: ' + err.message;
 			res.errorMessage = objresp.message;
 			res.status(objresp.status).send(objresp);
@@ -2274,6 +2441,12 @@ async function putResource(req, res, next) {
   *           application/json:
   *             schema: 
   *               $ref: '#/components/schemas/ApiResponse'
+  *       '429': 
+  *         description: Too Many Requests
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
   */
 async function patchResource(req, res, next) {
 	// extraigo parámetros de la URL
@@ -2282,10 +2455,10 @@ async function patchResource(req, res, next) {
 	const iri = req.query.iri;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso (si hay token hay que mirar si es válido)
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, true); // hace falta token de escritura
 		if (!valido) {
 			// sin autorización
@@ -2305,7 +2478,7 @@ async function patchResource(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -2315,8 +2488,8 @@ async function patchResource(req, res, next) {
 	} 
 	
 	// compruebo que exista el id correspondiente en el modelo de la configuración	
-	const mel = _.find(apis[apiId].config.model, (el) => el.id === id);
-	if (mel != undefined) {
+	const mel = apis[apiId].modelById[id];
+	if (mel != null) {
 		// compruebo que la iri esté bien formada
 		try {
 			// lanza una excepción si iri no está bien formada: https://developer.mozilla.org/en-US/docs/Web/API/URL/URL
@@ -2330,13 +2503,14 @@ async function patchResource(req, res, next) {
 		}
 		
 		// obtengo el patch del body
-		const patch = req.body;		
+		const patch = req.body;
+		
 		try {
 			// pido la validación del patch
-			modelValidator.validatePatch(patch, mel, apis[apiId].config);
-		} catch(error) {
+			modelValidator.validatePatch(patch, mel, apis[apiId]);
+		} catch(err) {
 			objresp.status = 400;
-			objresp.message = 'Invalid request: ' + error.message;
+			objresp.message = 'Invalid request: ' + err.message;
 			res.errorMessage = objresp.message;
 			res.status(objresp.status).send(objresp);
 			return;
@@ -2345,7 +2519,9 @@ async function patchResource(req, res, next) {
 		// ha pasado el validador, la actualización debería poder hacerse		
 		try {
 			// pido la actualización (puede fallar dependiendo de los valores de la representación)
-			let datos = await resourceUpdater.patchResource(iri, patch, mel, apis[apiId], {quuid: req.quuid, apiId: apiId});
+			// oct-26: indico que no es cacheable
+			const datos = await resourceUpdater.patchResource(iri, patch, mel, apis[apiId],
+				{quuid: req.quuid, apiId, nocache: true});
 			// meto info de las triplas borradas/creadas y consultas
 			res.numberOfQueries = datos.numberOfQueries;
 			res.deletedTriples = datos.deletedTriples;
@@ -2361,8 +2537,8 @@ async function patchResource(req, res, next) {
 			//dataManager.cleanCachedQueries(new Date().getTime());
 			return;
 		} catch(err) {
-			// cojo el status del error incluido, si no hay habrá que asumir que el error es del servidor
-			objresp.status = err.status || 500;
+			// compruebo si es error 429, en otro caso habrá que asumir que el error es del servidor
+			objresp.status = err.code == 429? 429 : 500;
 			objresp.message = 'Resource update error: ' + err.message;
 			res.errorMessage = objresp.message;
 			res.status(objresp.status).send(objresp);
@@ -2452,6 +2628,12 @@ async function patchResource(req, res, next) {
   *           application/json:
   *             schema: 
   *               $ref: '#/components/schemas/ApiResponse'
+  *       '429': 
+  *         description: Too Many Requests
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
   */
 async function deleteResource(req, res, next) {
 	// extraigo parámetros de la URL
@@ -2460,10 +2642,10 @@ async function deleteResource(req, res, next) {
 	const iri = req.query.iri;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso (si hay token hay que mirar si es válido)
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, true); // hace falta token de escritura
 		if (!valido) {
 			// sin autorización
@@ -2483,7 +2665,7 @@ async function deleteResource(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -2492,9 +2674,9 @@ async function deleteResource(req, res, next) {
 		return;
 	} 
 	
-	// compruebo que exista el id correspondiente en el modelo de la configuración	
-	const mel = _.find(apis[apiId].config.model, (el) => el.id === id);
-	if (mel != undefined) {
+	// compruebo que exista el id correspondiente en el modelo de la configuración
+	const mel = apis[apiId].modelById[id];
+	if (mel != null) {
 		// compruebo que la iri esté bien formada
 		try {
 			// lanza una excepción si iri no está bien formada: https://developer.mozilla.org/en-US/docs/Web/API/URL/URL
@@ -2509,7 +2691,9 @@ async function deleteResource(req, res, next) {
 		
 		// pido el borrado
 		try {
-			let datos = await resourceUpdater.deleteResource(iri, mel, apis[apiId], {quuid: req.quuid, apiId: apiId});
+			// oct-26: indico que no es cacheable
+			const datos = await resourceUpdater.deleteResource(iri, mel, apis[apiId],
+				{quuid: req.quuid, apiId, nocache: true});
 			res.numberOfQueries = datos.numberOfQueries;
 			res.deletedTriples = datos.deletedTriples;
 			objresp.status = 200;
@@ -2521,8 +2705,8 @@ async function deleteResource(req, res, next) {
 			//dataManager.cleanCachedQueries(new Date().getTime());
 			return;			
 		} catch(err) {
-			// si no hacemos más comprobaciones de la petición habrá que asumir que el error es del servidor
-			objresp.status = 500;
+			// compruebo si es error 429, en otro caso habrá que asumir que el error es del servidor
+			objresp.status = err.code == 429? 429 : 500;
 			objresp.message = 'Resource delete error: ' + err.message;
 			res.errorMessage = objresp.message;
 			res.status(objresp.status).send(objresp);
@@ -2613,6 +2797,12 @@ async function deleteResource(req, res, next) {
   *           application/json:
   *             schema: 
   *               $ref: '#/components/schemas/ApiResponse'
+  *       '429': 
+  *         description: Too Many Requests
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
   */
 async function answerQuery(req, res, next) {
 	// extraigo parámetros de la URL
@@ -2620,10 +2810,10 @@ async function answerQuery(req, res, next) {
 	const id = req.query.id;
 		
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// si hay token hay que mirar si es válido para lectura
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, false);
 		if (!valido) {
 			// sin autorización
@@ -2636,7 +2826,7 @@ async function answerQuery(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -2646,15 +2836,15 @@ async function answerQuery(req, res, next) {
 	} 
 	
 	// recupero la plantilla de la consulta
-	let qtemp = _.find(apis[apiId].config.queryTemplates, (el) => el.id === id);
-	if (qtemp != undefined) {	
+	const qtemp = apis[apiId].qtempsById[id];
+	if (qtemp != null) {	
 		// preparo objeto auxiliar para la consulta
-		let aux = {};
+		const aux = {};
 		// meto cada parámetro en el objeto auxiliar
 		for (let i=0; i<qtemp.parameters.length; i++) {				
 			const par = qtemp.parameters[i];
 			// si existe el parámetro en la petición...
-			if (req.query[par.label] != undefined)
+			if (req.query[par.label] != null)
 				aux[par.label] = req.query[par.label];
 		}
 		// valido parámetros de la consulta (y hago conversiones de parámetros si hace falta)
@@ -2669,23 +2859,28 @@ async function answerQuery(req, res, next) {
 		}
 		
 		// obtengo endpoint
-		const endpoint = _.find(apis[apiId].config.endpoints, el => el.id === qtemp.endpoint);
-		// obtengo prefijos
-		//const prefixes = apis[apiId].config.prefixes;
+		//const endpoint = apis[apiId].endpointsById[qtemp.endpoint];
 		try {
 			// obtengo resultados de la consulta
-			let datos = await dataManager.answerQuery(endpoint, qtemp, aux, {quuid: req.quuid, apiId: apiId});
-			//let datos = await dataManager.answerQuery(endpoint, qtemp, aux, req.quuid, prefixes);
+			const datos = await dataManager.answerQuery(apis[apiId], qtemp, aux, {quuid: req.quuid, apiId});
 		
 			// si hay salida la devuelvo
-			if (datos != undefined) {
+			if (datos != null) {
 				res.type('json');
-				res.send( datos );
+				res.cached = datos.cached;
+				res.send( datos.data );
 				return;
 			}
+			else { // 2024-6-12: si no devuelve datos hay un problema
+				// console.warn("NO HAY DATOS, NI SIQUIERA LA CONSULTA");
+				objresp.status = 500;
+				objresp.message = 'There was a problem with the endpoint. The response was empty. Please try again';
+				res.errorMessage = objresp.message;
+				res.status(objresp.status).send(objresp);
+			}
 		} catch(err) {
-			// la plantilla se validó en la configuración, si hay fallo asumimos que el error es del servidor
-			objresp.status = 500;
+			// compruebo si es error 429, en otro caso habrá que asumir que el error es del servidor
+			objresp.status = err.code == 429? 429 : 500;
 			objresp.message = 'Query error: ' + err.message;
 			res.errorMessage = objresp.message;
 			res.status(objresp.status).send(objresp);
@@ -2700,7 +2895,7 @@ async function answerQuery(req, res, next) {
 		return;
 	}
 	
-	// si llega aquí la petición es incorrecta	
+	// si llega aquí la petición es incorrecta (no llegará nunca)
 	objresp.status = 400;
 	objresp.message = 'Invalid request: include the "id" of an existing query template with the required "parameters"';
 	res.errorMessage = objresp.message;
@@ -2776,10 +2971,10 @@ async function getListOfDumps(req, res, next) {
 	const apiId = req.params.apiId;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// si hay token hay que mirar si es válido para lectura
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, false);
 		if (!valido) {
 			// sin autorización
@@ -2792,7 +2987,7 @@ async function getListOfDumps(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -2802,7 +2997,7 @@ async function getListOfDumps(req, res, next) {
 	}
 	
 	// pido el path de la lista de dumps al dumpManager y la devuelvo
-	let ldpath = await dumpManager.getListOfDumpsPath(apiId);
+	const ldpath = await dumpManager.getListOfDumpsPath(apiId);
 	if (ldpath == null) {
 		// no existe la lista de dumps (debería estar creada si se inicializó la API...)
 		objresp.status = 500;
@@ -2894,10 +3089,10 @@ async function getDump(req, res, next) {
 	const dumpId = req.params.dumpId;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};	
+	const objresp = {};	
 	
 	// si hay token hay que mirar si es válido para lectura
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, false);
 		if (!valido) {
 			// sin autorización
@@ -2910,7 +3105,7 @@ async function getDump(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -2920,7 +3115,7 @@ async function getDump(req, res, next) {
 	}
 	
 	// pido el path del dump 
-	let dumpPath = await dumpManager.getDumpPath(apiId, dumpId);
+	const dumpPath = await dumpManager.getDumpPath(apiId, dumpId);
 	if (dumpPath == null) {
 		objresp.status = 404;
 		objresp.message = 'Dump not found: ' + dumpId;
@@ -2992,16 +3187,22 @@ async function getDump(req, res, next) {
   *           application/json:
   *             schema: 
   *               $ref: '#/components/schemas/ApiResponse'
+  *       '429': 
+  *         description: Too Many Requests
+  *         content:
+  *           application/json:
+  *             schema: 
+  *               $ref: '#/components/schemas/ApiResponse'
   */
 async function createDump(req, res, next) {
 	// extraigo parámetros de la URL
 	const apiId = req.params.apiId;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};
+	const objresp = {};
 	
 	// compruebo si tiene permiso (si hay token hay que mirar si es válido)
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, true); // hace falta token de escritura
 		if (!valido) {
 			// sin autorización
@@ -3021,7 +3222,7 @@ async function createDump(req, res, next) {
 	}
 
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -3035,7 +3236,7 @@ async function createDump(req, res, next) {
 	
 	// pido validación de la configuración del dump
 	try {
-		modelValidator.validateDumpConfig(dc, apis[apiId].config);
+		modelValidator.validateDumpConfig(dc, apis[apiId]);
 	} catch(err) {
 		objresp.status = 400;
 		objresp.message = 'Invalid Dump configuration: ' + err.message;
@@ -3048,7 +3249,7 @@ async function createDump(req, res, next) {
 	try {
 		// pido obtener el dump
 		const urlini = config.scheme + '://' + config.authority;
-		let loc = await dumpManager.createDump(apis[apiId], dc, {quuid: req.quuid, apiId: apiId});
+		const loc = await dumpManager.createDump(apis[apiId], dc, {quuid: req.quuid, apiId});
 		
 		// devuelvo 202 (petición aceptada) y la respuesta del dumpManager con la localización
 		res.location(loc); // ajusto localización en la respuesta
@@ -3060,8 +3261,8 @@ async function createDump(req, res, next) {
 		res.status(objresp.status).send(objresp);
 		return;			
 	} catch(err) {
-		// si no hacemos más comprobaciones de la configuración del dump habrá que asumir que el error es del servidor
-		objresp.status = 500;
+		// compruebo si es error 429, en otro caso habrá que asumir que el error es del servidor
+		objresp.status = err.code == 429? 429 : 500;
 		objresp.message = 'Dump creation error: ' + err.message;
 		res.errorMessage = objresp.message;
 		res.status(objresp.status).send(objresp);
@@ -3125,10 +3326,10 @@ async function deleteDump(req, res, next) {
 	const dumpId = req.params.dumpId;
 	
 	// pregenero objeto de respuesta
-	let objresp = {};	
+	const objresp = {};	
 	
 	// si hay token hay que mirar si es válido para escritura
-	if (req.token != undefined) {
+	if (req.token != null) {
 		const valido = validarTokenApi(req.token, apiId, true); // hace falta token de escritura
 		if (!valido) {
 			// sin autorización
@@ -3148,7 +3349,7 @@ async function deleteDump(req, res, next) {
 	}
 	
 	// compruebo que la api exista
-	if (apis[apiId] == undefined) {
+	if (apis[apiId] == null) {
 		// no existe la api
 		objresp.status = 404;
 		objresp.message = 'API not found: "' + apiId + '" is not registered';
@@ -3158,7 +3359,7 @@ async function deleteDump(req, res, next) {
 	}
 	
 	// pido el path del dump 
-	let dumpPath = await dumpManager.getDumpPath(apiId, dumpId);
+	const dumpPath = await dumpManager.getDumpPath(apiId, dumpId);
 	if (dumpPath == null) {
 		objresp.status = 404;
 		objresp.message = 'Dump not found: ' + dumpId;
@@ -3181,52 +3382,6 @@ async function deleteDump(req, res, next) {
 		}
 	}
 	return;
-}
-
-
-
-// FUNCIÓN PARA LIMPIAR LOS RECURSOS ANTIGUOS DE LA CACHÉ
-function cleanCache() {
-	// inicializo logmess
-	let logmess = {};
-	logmess.info = 'Cache cleaned';	
-	logmess.started = new Date().toISOString();
-	logmess.resourcesCached = {};
-	
-	// obtengo timestamp límite para borrar de la caché
-	const timeNow = new Date().getTime();
-	//const timeThreshold = timeNow - 120000; // 2 minutos!!!
-	const timeThreshold = timeNow - 24*60*60*1000*config.daysCache; // timestamp límite
-
-	// analizo la caché de cada api
-	for (let apiId in apis) {
-		// inicializo
-		logmess.resourcesCached[apiId] = {
-			inspected: 0,
-			cleaned: 0		
-		};
-		for (let mel in apis[apiId].cache) {
-			// iris de mel a borrar
-			let irisBorrar = [];			
-			for (let iri in apis[apiId].cache[mel]) {
-				logmess.resourcesCached[apiId].inspected++; // un recurso más inspeccionado...
-				if (apis[apiId].cache[mel][iri].timestampCache < timeThreshold)
-					irisBorrar.push(iri); // incluyo en la lista de borrrados
-			}
-			// actualizo borrados
-			logmess.resourcesCached[apiId].cleaned += irisBorrar.length;
-			// y los borro de la caché
-			for (let i=0; i<irisBorrar.length; i++)
-				delete apis[apiId].cache[mel][irisBorrar[i]];
-		}
-	}
-	
-	// pido también la limpieza de las consultas cacheadas
-	logmess.queriesCached = dataManager.cleanCachedQueries(timeThreshold);	
-	
-	// hago el log
-	logmess.ended = new Date().toISOString();
-	logger.info(logmess)
 }
 
 
@@ -3262,7 +3417,5 @@ module.exports = {
 	getListOfDumps,
 	getDump,
 	createDump,
-	deleteDump,
-	
-	cleanCache
+	deleteDump
 }

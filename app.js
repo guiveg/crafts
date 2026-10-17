@@ -9,7 +9,6 @@ const responseTime = require('response-time');
 const swaggerUi = require('swagger-ui-express');
 const openApiValidator = require('express-openapi-validator');
 const { v4: uuidv4 } = require('uuid');
-const univAnalytics = require('universal-analytics');
 const cors = require('cors');
 
 // librerías propias
@@ -27,14 +26,14 @@ app.set('trust proxy', true); // para registrar correctamente la IP del cliente
 
 
 // inicializo rutas
-let getRoutes = { };
-let postRoutes = { };
-let putRoutes = { };
-let patchRoutes = { };        
-let deleteRoutes = { };
+const getRoutes = { };
+const postRoutes = { };
+const putRoutes = { };
+const patchRoutes = { };        
+const deleteRoutes = { };
 
 function initServer() {
-	// preparo rutas
+	// GET routes
 	getRoutes['/users'] = apiManager.getUsers;
 	getRoutes['/users/:login'] = apiManager.getUser;
 	getRoutes['/users/:login/:actKey'] = apiManager.activateUser; // para activar a un usuario
@@ -70,7 +69,7 @@ function initServer() {
 	app.use(bodyParser.urlencoded({ extended: true }));
 
 	// parse application/json
-	app.use(bodyParser.json());	
+	app.use(bodyParser.json({ limit: '50mb' })); // 2025/01/12 añadido el límite
 	
 	// 30-12-2020 documentación con swagger-jsdoc y swagger-ui-express (no hago logging de ésta)
 	const swaggerOptions = {  
@@ -85,8 +84,12 @@ function initServer() {
 		
 	// logging
 	app.use(responseTime((req, res, time) => {
+		// descarto las peticiones favicon.ico
+		if (req.path === '/favicon.ico')
+			return;
+			
 		// tipo de log según el código HTTP de la respuesta
-		var loglev = "";
+		let loglev = "";
 		if (res.statusCode >= 100) 
 			loglev = "info";
 		if (res.statusCode >= 400) 
@@ -95,42 +98,44 @@ function initServer() {
 			loglev = "error";
 	
 		// preparo mensaje de log
-		let logmess = {};
+		const logmess = {};
 		// info HTTP
 		logmess.method = req.method;
 		logmess.url = req.url;
 		logmess.status = res.statusCode;
 		// petición
-		if (req.quuid != undefined)
+		if (req.quuid != null)
 			logmess.reqId = req.quuid;
 		// usuario 
-		if (req.login != undefined)
+		if (req.login != null)
 			logmess.user = req.login;
-		if (req.token != undefined)
+		if (req.token != null)
 			logmess.token = req.token;				
 		// IP del cliente
-		if ( (req.headers['x-forwarded-for'] || req.connection.remoteAddress) != undefined )
+		if ( (req.headers['x-forwarded-for'] || req.connection.remoteAddress) != null )
 			logmess.clientIP = (req.headers['x-forwarded-for'] || req.connection.remoteAddress).split(':').pop();
 		// mensaje de error
-		if (res.errorMessage != undefined)
+		if (res.errorMessage != null)
 			logmess.error = res.errorMessage;
 		// localización del recurso creado con peticiones POST
-		if (res.loc != undefined)
+		if (res.loc != null)
 			logmess.location = res.loc;
 		// apiId
-		if (req.params != undefined && req.params.apiId != undefined)
+		if (req.params != null && req.params.apiId != null)
 			logmess.apiId = req.params.apiId;
 		// info consultas
-		if (res.numberOfQueries != undefined)
+		if (res.cached != null)	// de las consultas parametrizadas
+			logmess.cached = res.cached;
+		if (res.numberOfQueries != null)
 			logmess.numberOfQueries = res.numberOfQueries;
-		if (res.allQueries != undefined)
+		if (res.allQueries != null)
 			logmess.allQueries = res.allQueries;
-		if (res.numberOfQueries != undefined && res.allQueries != undefined && res.allQueries > 0)
+		if (res.numberOfQueries != null && res.allQueries != null && res.allQueries > 0)
 			logmess.percCacheHit = Number((100 * (res.allQueries - res.numberOfQueries) / res.allQueries).toFixed(2));
 		// info actualizaciones
-		if (res.deletedTriples != undefined)
+		if (res.deletedTriples != null)
 			logmess.deletedTriples = res.deletedTriples;
-		if (res.insertedTriples != undefined)
+		if (res.insertedTriples != null)
 			logmess.insertedTriples = res.insertedTriples;
 		// tiempo para resolver la petición en milisegundos
 		logmess.timeMilliseconds = Number(time.toFixed(2));
@@ -141,86 +146,78 @@ function initServer() {
 			message: logmess
 		});
 		
-		// 04-02-2021 analíticas
-		if (config.gaTrackId != undefined) {
+		// 04-02-2021 analíticas previas
+		// 07-10-2026 analíticas revisadas para GA4
+		if (config.gaMeasurementId != null) {
 			// preparo id de usuario anónimo
 			let ida;
-			if (req.login != undefined)
+			if (req.login != null)
 				ida = util.getHash( req.login );
-			else if (req.token != undefined)
+			else if (req.token != null)
 				ida = util.getHash( req.token + logmess.clientIP );
 			else
 				ida = util.getHash( logmess.clientIP );
-			
-			// preparo visitante para las analíticas
-			let visitor = univAnalytics(config.gaTrackId, ida, {strictCidFormat: false});
-			
-			// 07-07-2021 override de la IP para los analytics (que se anonimizará)
-			visitor.set('uip', logmess.clientIP);
-			
+				
 			// preparo datos evento
-			let evdata = {};
-			// Event category.
+			const evdata = {};
+			// apiId
+			if (logmess.apiId != null)
+				evdata.api_id = logmess.apiId;
+			// detecto categoría de la llamada
 			if (req.url === '/')
-				evdata.ec = 'index';
+				evdata.cat = 'index';
 			else if (req.url === '/users')
-				evdata.ec = 'users';
+				evdata.cat = 'users';
 			else if (req.url.includes('/users/') && req.url.split('/').length == 4)
-				evdata.ec = 'actKey';
+				evdata.cat = 'actKey';
 			else if (req.url.includes('/users/'))
-				evdata.ec = 'user';
+				evdata.cat = 'user';
 			else if (req.url === '/apis')
-				evdata.ec = 'apis';
+				evdata.cat = 'apis';
 			else if (req.url.includes('/apis/') && req.url.includes('/tokens'))
-				evdata.ec = 'apiTokens';
+				evdata.cat = 'apiTokens';
 			else if (req.url.includes('/apis/') && req.url.includes('/resources'))
-				evdata.ec = 'resources';
+				evdata.cat = 'resources';
 			else if (req.url.includes('/apis/') && req.url.includes('/resource'))
-				evdata.ec = 'resource';
+				evdata.cat = 'resource';
 			else if (req.url.includes('/apis/') && req.url.includes('/query'))
-				evdata.ec = 'query';
+				evdata.cat = 'query';
 			else if (req.url.includes('/apis/') && req.url.includes('/dumps') && req.url.split('/').length == 5)
-				evdata.ec = 'dump';
+				evdata.cat = 'dump';
 			else if (req.url.includes('/apis/') && req.url.includes('/dumps'))
-				evdata.ec = 'dumps';
+				evdata.cat = 'dumps';
 			else if (req.url.includes('/apis/') && req.url.split('/').length == 3)
-				evdata.ec = 'api';
-			// Event action.
-			evdata.ea = req.method;
-			// Event label.
-			if (logmess.apiId != undefined)
-				evdata.el = logmess.apiId;
-			// Event value.
-			evdata.ev = res.statusCode;
-			// Event path.
-			evdata.dp = req.url;			
+				evdata.cat = 'api';
+			else
+				return;
+			// extraigo id (para resources, queries y dumps)
+			if (req.query.id != null)
+				evdata.id = req.query.id;
+			if (evdata.cat === 'resources' && req.query.iris != null)
+				evdata.num_resources = req.query.iris.length;
+			// método
+			evdata.method = req.method;
+			// resultado
+			evdata.status_code = res.statusCode;
+			// duración (ms)
+			evdata.duration_ms = Number(time.toFixed(0));
+			// info consultas
+			if (logmess.cached != null)
+				evdata.cached = logmess.cached;
+			if (logmess.numberOfQueries != null)
+				evdata.sent_queries = logmess.numberOfQueries;
+			if (logmess.percCacheHit != null)
+				evdata.cache_hit_pct = logmess.percCacheHit;
+			// info actualizaciones
+			if (logmess.insertedTriples != null)
+				evdata.inserted_triples = logmess.insertedTriples;
+			if (logmess.deletedTriples != null)
+				evdata.deleted_triples = logmess.deletedTriples;
 			
-			// prepara datos timing
-			let tmdata = {
-				utc: evdata.ec, // categoría
-				utv: req.method, // variable de medida
-				utt: Number(time.toFixed(0)) // medida en ms
-			};
-			// si hay api, va como label
-			if (logmess.apiId != undefined)
-				tmdata.utl = logmess.apiId;
-						
-			// hago daisy chaining de visita a página, evento y timing
-			visitor
-				.pageview(req.url)
-				.event(evdata)
-				.timing(tmdata)
-				.send();
+			// mando el evento con las analíticas
+			sendAnalytics(ida, evdata);
 		}
 	}));
-			
-	// 02-02-2021 sirvo la página de índice aquí para que no me la corte el validador
-	app.get('/', apiManager.getIndex);
-	// 09-02-2021 sirvo los recursos en el directorio 'html' (CRAFTSconfig101.html)
-	app.use('/', express.static('html'));
-	
-	// 07-02-2021 sirvo guía de configuración
-	//app.get('/CRAFTSconfig101', apiManager.getConfigGuide);
 	
 	// 03-02-2021 sirvo los logs al root
 	app.use('/logs', function (req, res, next) {		
@@ -229,9 +226,9 @@ function initServer() {
 		const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
 		// valido el usuario (aunque sólo permito acceso al root)
 		const user = apiManager.retrieveUser(login);
-		if (user != undefined) {
+		if (user != null) {
 			// con cuenta activada y con coincidencia de password
-			if (user.activationKey == undefined && user.password === password) {
+			if (user.activationKey == null && user.password === password) {
 				// usuario válido, guardo el login en req
 				req.login = login;
 				// pero sólo permito acceso al root
@@ -249,7 +246,7 @@ function initServer() {
 			}
 		} 
 		// sin autorización
-		let err = new Error('Unauthorized');
+		const err = new Error('Unauthorized');
 		err.status = 401;
 		throw err;
 	});
@@ -277,9 +274,9 @@ function initServer() {
 						const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
 						// valido el usuario
 						const user = apiManager.retrieveUser(login);
-						if (user != undefined) {
+						if (user != null) {
 							// con cuenta activada y con coincidencia de password
-							if (user.activationKey == undefined && user.password === password) {
+							if (user.activationKey == null && user.password === password) {
 								// usuario válido, guardo el login en req
 								req.login = login;
 								return Promise.resolve(true);
@@ -291,7 +288,7 @@ function initServer() {
 					BearerAuth: async (req, scopes, schema) => {
 						// cojo el token y lo guardo en req (se encargará el apiManager de validar el token)
 						const token = (req.headers.authorization || '').split(' ')[1] || '';
-						if (token != undefined) {
+						if (token != null) {
 							req.token = token;
 							return Promise.resolve(true);
 						}
@@ -328,7 +325,7 @@ function initServer() {
 	// 4-1-2021 error handler de openApiValidator 
 	app.use((err, req, res, next) => {
 		// preparo objeto de respuesta
-		let objresp = {};			
+		const objresp = {};			
 		// pongo código de error
 		objresp.status = err.status || 500; // error 500 si no viene incluido...
 		// pongo mensaje
@@ -345,6 +342,39 @@ function initServer() {
 	});
 }
 
+function sendAnalytics(clientId, params) {
+	// preparo un controlador para abortar la conexión si no responde en 1s
+	const controller = new AbortController();
+ 	const timeout = setTimeout(() => {
+		controller.abort();
+	}, 1000);
+	
+	const url =	`${config.gaURLbase}?measurement_id=${config.gaMeasurementId}` +
+		`&api_secret=${config.gaApiSecret}`;
+
+	const body = {
+		client_id: clientId,
+		events: [{
+			name: 'api_call',
+			params
+		}]
+	};
+
+	// mando los datos
+	fetch(url, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(body)
+	})
+	.finally(() => {
+		clearTimeout(timeout);
+	})
+	.catch(() => {
+		// ignoramos errores
+	});
+}
 
 function startServer() {    
     //  Start the app on the specific interface (and port).
@@ -362,10 +392,6 @@ async function start() {
 	
 	// llamo a empezar el servidor
 	startServer();
-		
-	// programo limpieza periódica de la caché
-	//setInterval(apiManager.cleanCache, 60000); // cada minuto
-	setInterval(apiManager.cleanCache, config.millisecsCleanCache);
 }
 
 

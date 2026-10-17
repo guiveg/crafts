@@ -1,4 +1,3 @@
-const _ = require('underscore');
 const config = require('../data/config'); // para las URLs y locations
 const logger = require('./logger'); // para el logging
 const dataManager = require('./dataManager'); // para los datos
@@ -36,7 +35,7 @@ async function initApi(apiId) {
 
 // BORRADO DE LOS DUMPS DE UNA API
 async function deleteApi(apiId) {
-	if (dumpIndexApi[apiId] != undefined) {
+	if (dumpIndexApi[apiId] != null) {
 		// recorro índice de dumps para borrar cada uno
 		for (let i=0; i<dumpIndexApi[apiId].length; i++) {
 			const dumpid = dumpIndexApi[apiId][i].id;
@@ -79,13 +78,13 @@ async function getDumpPath(apiId, dumpid) {
 
 // BORRAR UN DUMP
 async function deleteDump(apiId, dumpid) {
-	if (dumpIndexApi[apiId] != undefined) {
+	if (dumpIndexApi[apiId] != null) {
 		// obtengo el path del dump y lo borro
 		const dumpath = dirDumpPath + apiId + "_" + dumpid;			
 		await util.deleteFile(dumpath);	
 			
-		// actualizo dumps eliminando dumpid de la api		
-		dumpIndexApi[apiId] = _.filter(dumpIndexApi[apiId], function(el) { return el.id !== dumpid; });
+		// actualizo dumps eliminando dumpid de la api
+		dumpIndexApi[apiId] = dumpIndexApi[apiId].filter(el => el.id !== dumpid);
 		// guardamos el fichero de índice
 		const ldpath = dirDumpPath + apiId + config.listDumpFileEnding;
 		await util.saveFile(ldpath, dumpIndexApi[apiId]);
@@ -106,13 +105,13 @@ async function createDump(api, dc, qinfo) {
 	
 	// compruebo si hay que crear el dump
 	let existe = await util.checkFile(path);
-	const del =_.find(dumpIndexApi[api.config.apiId], el => el.id === dumpid);	
+	const del = dumpIndexApi[api.config.apiId].find(el => el.id === dumpid);	
 	let crear = false; // inicializamos a false
 	if (!existe)
 		crear = true;
 	else { 
 		// compruebo info del índice por si hay que crearlo de nuevo		
-		if (del == undefined)
+		if (del == null)
 			crear = true;
 		else if (del.status === 'failed')
 			crear = true;
@@ -121,8 +120,8 @@ async function createDump(api, dc, qinfo) {
 	// hay que crear el dump
 	if (crear) {
 		// si existe del hay que borrarlo del índice
-		if (del != undefined)
-			dumpIndexApi[api.config.apiId] = _.without(dumpIndexApi[api.config.apiId], del);
+		if (del !== null)
+			dumpIndexApi[api.config.apiId] = dumpIndexApi[api.config.apiId].filter(el => el !== del);
 	
 		// inicializo dump con los datos a guardar
 		let dump = {};
@@ -180,24 +179,24 @@ async function generateDump(api, dump, qinfo) {
 		// resuelvo los parámetros (si los hay)
 		for (const par in step.parameters) {		
 			const value = step.parameters[par];
-			if (value.source != undefined && value.source === "parameters") 
+			if (value.source != null && value.source === "parameters") 
 				objr.request[par] = dc.parameters[value.key];
-			else if (value.source != undefined && value.source === "steps") { // recupero parámetro de un resultado intermedio (step)
+			else if (value.source != null && value.source === "steps") { // recupero parámetro de un resultado intermedio (step)
 				// recupero step al que se refiere
-				const stepref = _.find(dc.steps, (el) => el.id === value.id);
-				if (stepref != undefined) {
+				const stepref = dc.steps.find(el => el.id === value.id);
+				if (stepref != null) {
 					// recupero resultados intermedios
-					const resref = _.find(results, (el) => el.id === value.id);
-					if (resref != undefined) {					
+					const resref = results.find(el => el.id === value.id);
+					if (resref != null) {					
 						// hay steps y resultados, obtengo el parámetro deseado según el tipo de step
 						if (stepref.type === "resource") {
 							const el = resref.data[value.key];
-							if (el != undefined) {
+							if (el !== null) {
 								// obj.request[par] = el; // TODO previo
 								// 24-4-21 actualización 
 								// el sólo puede ser un literal o un array de literales
 								if (Array.isArray(el) && typeof el[0] === 'object') // me quedo sólo con las iris
-									obj.request[par] = _.pluck(el, "iri");
+									obj.request[par] = el.map(item => item.iri);
 								else if (!Array.isArray(el) && typeof el === 'object') // me quedo sólo con la iri del objeto
 									obj.request[par] = el.iri;
 								else // guardo directamente el
@@ -216,10 +215,10 @@ async function generateDump(api, dump, qinfo) {
 							// incluyo en el array cada valor encontrado
 							for (let i=0; i<resref.data.length; i++) {
 								const el = resref.data[i][value.key];
-								if (el != undefined) {// incluyo valor (o valores si el es un array)
+								if (el != null) {// incluyo valor (o valores si el es un array)
 									// el sólo puede ser un literal o un array de literales
 									if (Array.isArray(el) && typeof el[0] === 'object') // me quedo sólo con las iris
-										vpar.push( _.pluck(el, "iri") );
+										vpar.push(el.map(item => item.iri));
 									else if (!Array.isArray(el) && typeof el === 'object') // me quedo sólo con la iri del objeto
 										vpar.push( el.iri );
 									else // guardo directamente el
@@ -227,9 +226,9 @@ async function generateDump(api, dump, qinfo) {
 								}
 							}
 							// compacto el array
-							vpar = _.flatten(vpar);
+							vpar = vpar.flat();
 							// elimino duplicados
-							vpar = _.uniq(vpar);
+							vpar = [...new Set(vpar)];
 							// guardo
 							objr.request[par] = vpar;							
 						} else if (stepref.type === "query") {
@@ -238,7 +237,7 @@ async function generateDump(api, dump, qinfo) {
 							// analizo cada fila de la consulta
 							for (let i=0; i<resref.data.results.bindings.length; i++) {
 								const row = resref.data.results.bindings[i];									
-								if (row[value.variable] != undefined) {
+								if (row[value.variable] != null) {
 									// hay binding para la variable, incluyo según el tipo
 									if (row[value.variable].type === "typed-literal")
 										vpar.push( Number(row[value.variable].value) );
@@ -247,7 +246,7 @@ async function generateDump(api, dump, qinfo) {
 								}									
 							}
 							// elimino duplicados
-							vpar = _.uniq(vpar);
+							vpar = [...new Set(vpar)];
 							// guardo
 							objr.request[par] = vpar;							
 						}
@@ -263,27 +262,23 @@ async function generateDump(api, dump, qinfo) {
 			switch(step.type) {
 				case "resource":
 					// convierto a petición de tipo "resources"
-					if (objr.request.iri != undefined) {
+					if (objr.request.iri != null) {
 						objr.request.iris = [];
 						objr.request.iris.push(objr.request.iri);
 					}
 				case "resources":
 					objr.request.api = api; // meto la API completa
 					// espero y guardo datos
-					let datos = await dataManager.getData(objr.request, qinfo);				
+					const datos = await dataManager.getData(objr.request, qinfo);				
 					objr.data = datos.data;
 					break;
 				case "query":				
 					// recupero la plantilla de la consulta
-					let qtemp = _.find(api.config.queryTemplates, (el) => el.id === objr.request.id);
-					if (qtemp != undefined) {
-						// obtengo endpoint
-						const endpoint = _.find(api.config.endpoints, el => el.id === qtemp.endpoint);
-						// obtengo prefijos
-						//const prefixes = api.config.prefixes;
+					const qtemp = api.qtempsById[objr.request.id];
+					if (qtemp !== null) {
 						// espero y guardo datos
-						objr.data = await dataManager.answerQuery(endpoint, qtemp, objr.request, qinfo);
-						//objr.data = await dataManager.answerQuery(endpoint, qtemp, objr.request, quuid, prefixes);
+						const qresp = await dataManager.answerQuery(api, qtemp, objr.request, qinfo);
+						objr.data = qresp.data;
 					}			
 					break;
 			}
@@ -328,17 +323,17 @@ async function generateDump(api, dump, qinfo) {
 		// obtengo el elemento de la salida
 		let outel = dc.output[i];
 		// si tiene source y label...
-		if (outel.label != undefined && outel.source != undefined) {
+		if (outel.label != null && outel.source != null) {
 			// obtengo primero el target para guardar los resultados a partir del label de outel
 			let target = outel.label;				
-			if (target != undefined) {
+			if (target != null) {
 				// creo el array si hace falta
-				if (salida[target] == undefined)
+				if (salida[target] == null)
 					salida[target] = [];
 				// meto los resultados según la fuente
 				if (outel.source === 'parameters') {
 					let sal = dc.parameters[outel.key];
-					if (sal != undefined) {
+					if (sal != null) {
 						if (Array.isArray(sal)) // si es un array...
 							salida[target] = salida[target].concat(sal);
 						else // si es un objeto o un literal
@@ -346,11 +341,11 @@ async function generateDump(api, dump, qinfo) {
 					}					
 				} else if (outel.source === 'steps') {
 					// recupero step al que se refiere
-					const stepref = _.find(dc.steps, (el) => el.id === outel.id);
-					if (stepref != undefined) {
+					const stepref = dc.steps.find(el => el.id === outel.id);
+					if (stepref != null) {
 						// recupero resultados intermedios
-						const resref = _.find(results, (el) => el.id === outel.id);
-						if (resref != undefined && resref.data != undefined) {
+						const resref = results.find(el => el.id === outel.id);
+						if (resref !== null && resref.data !== null) {
 							if (Array.isArray(resref.data)) // si es un array...
 								salida[target] = salida[target].concat(resref.data);
 							else // si es un objeto o un literal
@@ -377,7 +372,7 @@ async function generateDump(api, dump, qinfo) {
 	// actualizamos el índice
 	delete dump.output; // elimino los datos del objeto a guardar en el índice
 	// si existía el dump en el índice lo eliminamos
-	dumpIndexApi[apiId] = _.filter(dumpIndexApi[apiId], function(el) { return el.id !== dump.id; });
+	dumpIndexApi[apiId] = dumpIndexApi[apiId].filter(el => el.id !== dump.id);
 	// y ahora lo metemos
 	dumpIndexApi[apiId].push(dump);	
 	

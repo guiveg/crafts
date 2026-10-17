@@ -1,30 +1,32 @@
 {
   "name": "CRAFTS",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Configurable RESTful APIs For Triple Stores",
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Guillermo Vega-Gorgojo",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "dependencies": {
-    "body-parser": "^1.19.0",
-    "cors": "^2.8.5",
-    "digest-fetch": "^1.1.5",
-    "express": "^4.17.1",
-    "express-openapi-validator": "^4.10.9",
-    "mustache": "^4.1.0",
-    "node-fetch": "^2.6.1",
-    "nodemailer": "^6.6.2",
-    "openapi-types": "^7.2.3",
-    "response-time": "^2.3.2",
-    "swagger-jsdoc": "^6.0.2",
-    "swagger-ui-express": "^4.1.6",
-    "underscore": "^1.12.0",
-    "universal-analytics": "^0.4.23",
-    "uuid": "^8.3.2",
-    "winston": "^3.3.3",
-    "winston-daily-rotate-file": "^4.5.0"
+    "body-parser": "^2.3.0",
+    "cors": "^2.8.6",
+    "digest-fetch": "^3.1.1",
+    "express": "^5.2.1",
+    "express-openapi-validator": "^5.6.2",
+    "lru-cache": "^11.5.3",
+    "mustache": "^4.2.0",
+    "nodemailer": "^10.0.15",
+    "openapi-types": "^12.1.3",
+    "p-limit": "^7.3.3",
+    "response-time": "^2.3.4",
+    "swagger-jsdoc": "^6.3.0",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^14.0.2",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "allowScripts": {
+    "@scarf/scarf@1.4.0": true
   }
 }

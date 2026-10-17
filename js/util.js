@@ -63,7 +63,6 @@ function getHash(obj) {
 }
 
 
-
 module.exports = {
 	checkFile,
 	loadFile,
